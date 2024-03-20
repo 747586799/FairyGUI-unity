@@ -15,7 +15,7 @@ namespace FairyGUI
     public class TMPFont : BaseFont
     {
         protected TMP_FontAsset _fontAsset;
-
+        public override NTexture mainTexture => mainTextures[0];
         FontStyles _style;
         float _scale;
         float _padding;
@@ -27,16 +27,17 @@ namespace FairyGUI
         FontWeight _fontWeight;
         TextFormat _format;
         TMP_Character _char;
+        public TMP_Character currentChar => _char;
         TMP_Character _lineChar;
         Material _material;
-        MaterialManager _manager;
+        List<MaterialManager> _manager = new List<MaterialManager>();
+        private List<NTexture> mainTextures = new List<NTexture>();
 
         public TMPFont()
         {
             this.canTint = true;
             this.shader = "FairyGUI/TextMeshPro/Distance Field";
             this.keepCrisp = true;
-
             _defaultFontWeight = FontWeight.Medium;
         }
 
@@ -65,16 +66,20 @@ namespace FairyGUI
         {
             if (_manager != null)
             {
-                _manager.onCreateNewMaterial -= OnCreateNewMaterial;
-                _manager = null;
+                foreach (var materialManager in _manager)
+                {
+                    materialManager.onCreateNewMaterial -= OnCreateNewMaterial;
+                }
+
+                _manager.Clear();
             }
 
-            if (mainTexture != null)
+            foreach (var nTexture in mainTextures)
             {
-                mainTexture.Dispose();
-                mainTexture = null;
+                nTexture.Dispose();
             }
 
+            mainTextures.Clear();
             if (_material != null)
             {
                 Material.DestroyImmediate(_material);
@@ -85,12 +90,15 @@ namespace FairyGUI
         void Init()
         {
             Release();
-
-            mainTexture = new NTexture(_fontAsset.atlasTexture);
-            mainTexture.destroyMethod = DestroyMethod.None;
-
-            _manager = mainTexture.GetMaterialManager(this.shader);
-            _manager.onCreateNewMaterial += OnCreateNewMaterial;
+            foreach (var fontAssetAtlasTexture in _fontAsset.atlasTextures)
+            {
+                NTexture tex = new NTexture(fontAssetAtlasTexture);
+                tex.destroyMethod = DestroyMethod.None;
+                mainTextures.Add(tex);
+                MaterialManager manager = tex.GetMaterialManager(this.shader);
+                manager.onCreateNewMaterial += OnCreateNewMaterial;
+                _manager.Add(manager);
+            }
 
             _material = new Material(_fontAsset.material); //copy
             _material.SetFloat(ShaderUtilities.ID_TextureWidth, mainTexture.width);
@@ -103,8 +111,7 @@ namespace FairyGUI
             // _lineHeight = _fontAsset.faceInfo.lineHeight;
             _ascent = _fontAsset.faceInfo.pointSize;
             _lineHeight = _fontAsset.faceInfo.pointSize * 1.25f;
-
-            _lineChar = GetCharacterFromFontAsset('_', FontStyles.Normal);
+            _lineChar = GetCharacterFromFontAsset('_', FontStyles.Normal, true);
         }
 
         void OnCreateNewMaterial(Material mat)
@@ -122,21 +129,18 @@ namespace FairyGUI
             if (_format.outline > 0)
             {
                 graphics.ToggleKeyword("OUTLINE_ON", true);
-
                 block.SetFloat(ShaderUtilities.ID_OutlineWidth, _format.outline);
                 block.SetColor(ShaderUtilities.ID_OutlineColor, _format.outlineColor);
             }
             else
             {
                 graphics.ToggleKeyword("OUTLINE_ON", false);
-
                 block.SetFloat(ShaderUtilities.ID_OutlineWidth, 0);
             }
 
             if (_format.shadowOffset.x != 0 || _format.shadowOffset.y != 0)
             {
                 graphics.ToggleKeyword("UNDERLAY_ON", true);
-
                 block.SetColor(ShaderUtilities.ID_UnderlayColor, _format.shadowColor);
                 block.SetFloat(ShaderUtilities.ID_UnderlayOffsetX, _format.shadowOffset.x);
                 block.SetFloat(ShaderUtilities.ID_UnderlayOffsetY, -_format.shadowOffset.y);
@@ -145,7 +149,6 @@ namespace FairyGUI
             else
             {
                 graphics.ToggleKeyword("UNDERLAY_ON", false);
-
                 block.SetFloat(ShaderUtilities.ID_UnderlayOffsetX, 0);
                 block.SetFloat(ShaderUtilities.ID_UnderlayOffsetY, 0);
                 block.SetFloat(ShaderUtilities.ID_UnderlaySoftness, 0);
@@ -153,7 +156,6 @@ namespace FairyGUI
 
             block.SetFloat(ShaderUtilities.ID_FaceDilate, _format.faceDilate);
             block.SetFloat(ShaderUtilities.ID_OutlineSoftness, _format.outlineSoftness);
-
             if (_material.HasProperty(ShaderUtilities.ID_ScaleRatio_A))
             {
                 //ShaderUtilities.GetPadding does not support handle materialproperyblock, we have to use a temp material
@@ -163,7 +165,6 @@ namespace FairyGUI
                 _material.SetFloat(ShaderUtilities.ID_UnderlaySoftness, block.GetFloat(ShaderUtilities.ID_UnderlaySoftness));
                 _material.SetFloat(ShaderUtilities.ID_FaceDilate, block.GetFloat(ShaderUtilities.ID_FaceDilate));
                 _material.SetFloat(ShaderUtilities.ID_OutlineSoftness, block.GetFloat(ShaderUtilities.ID_OutlineSoftness));
-
                 _padding = ShaderUtilities.GetPadding(_material, false, false);
 
                 //and then set back the properteis
@@ -173,7 +174,9 @@ namespace FairyGUI
             }
 
             // Set Padding based on selected font style
+
             #region Handle Style Padding
+
             if (((_style & FontStyles.Bold) == FontStyles.Bold)) // Checks for any combination of Bold Style.
             {
                 if (_material.HasProperty(ShaderUtilities.ID_GradientScale))
@@ -202,17 +205,16 @@ namespace FairyGUI
                 else
                     _stylePadding = 0;
             }
+
             #endregion Handle Style Padding
         }
 
         override public void SetFormat(TextFormat format, float fontSizeScale)
         {
             _format = format;
-
             float size = format.size * fontSizeScale;
             if (_format.specialStyle == TextFormat.SpecialStyle.Subscript || _format.specialStyle == TextFormat.SpecialStyle.Superscript)
                 size *= SupScale;
-
             _scale = size / _fontAsset.faceInfo.pointSize * _fontAsset.faceInfo.scale;
             _style = FontStyles.Normal;
             if (format.bold)
@@ -226,21 +228,33 @@ namespace FairyGUI
                 _fontWeight = _defaultFontWeight;
                 _boldMultiplier = 1.0f;
             }
+
             if (format.italic)
                 _style |= FontStyles.Italic;
-
             format.FillVertexColors(vertexColors);
         }
 
-        override public bool GetGlyph(char ch, out float width, out float height, out float baseline)
+        public override TextFormat GetFormat()
         {
-            _char = GetCharacterFromFontAsset(ch, _style);
+            return _format;
+        }
+
+        override public bool GetGlyph(char ch, out float width, out float height, out float baseline, out bool isFallback)
+        {
+            isFallback = false;
+            _char = GetCharacterFromFontAsset(ch, _style, false);
+            if (_char == null)
+            {
+                _char = GetCharacterFromFontAsset(ch, _style, true);
+                if (_char != null)
+                    isFallback = true;
+            }
+
             if (_char != null)
             {
                 width = _char.glyph.metrics.horizontalAdvance * _boldMultiplier * _scale;
                 height = _lineHeight * _scale;
                 baseline = _ascent * _scale;
-
                 if (_format.specialStyle == TextFormat.SpecialStyle.Subscript)
                 {
                     height /= SupScale;
@@ -254,7 +268,6 @@ namespace FairyGUI
 
                 height = Mathf.RoundToInt(height);
                 baseline = Mathf.RoundToInt(baseline);
-
                 return true;
             }
             else
@@ -266,13 +279,13 @@ namespace FairyGUI
             }
         }
 
-        TMP_Character GetCharacterFromFontAsset(uint unicode, FontStyles fontStyle)
+        TMP_Character GetCharacterFromFontAsset(uint unicode, FontStyles fontStyle, bool fallback = true)
         {
             bool isAlternativeTypeface;
 #pragma warning disable
             TMP_FontAsset actualAsset;
 #pragma warning restore
-            return TMP_FontAssetUtilities.GetCharacterFromFontAsset(unicode, _fontAsset, true, fontStyle, _fontWeight, 
+            return TMP_FontAssetUtilities.GetCharacterFromFontAsset(unicode, _fontAsset, fallback, fontStyle, _fontWeight,
                 out isAlternativeTypeface
                 //,out actualAsset //old TMP version need this line
             );
@@ -298,54 +311,59 @@ namespace FairyGUI
         override public int DrawGlyph(float x, float y,
             List<Vector3> vertList, List<Vector2> uvList, List<Vector2> uv2List, List<Color32> colList)
         {
-            GlyphMetrics metrics = _char.glyph.metrics;
-            GlyphRect rect = _char.glyph.glyphRect;
+            return DrawGlyph(_char, x, y, vertList, uvList, uv2List, colList);
+        }
 
+        public int DrawGlyph(TMP_Character character, float x, float y,
+            List<Vector3> vertList, List<Vector2> uvList, List<Vector2> uv2List, List<Color32> colList)
+        {
+            GlyphMetrics metrics = character.glyph.metrics;
+            GlyphRect rect = character.glyph.glyphRect;
+            // 可能是fallback的character，从character中取出真正用于渲染的font
+            TMP_FontAsset realFontAsset = character.textAsset as TMP_FontAsset;
+            if (!realFontAsset)
+                realFontAsset = _fontAsset;
             if (_format.specialStyle == TextFormat.SpecialStyle.Subscript)
                 y = y - Mathf.RoundToInt(_ascent * _scale * SupOffset);
             else if (_format.specialStyle == TextFormat.SpecialStyle.Superscript)
                 y = y + Mathf.RoundToInt(_ascent * _scale * (1 / SupScale - 1 + SupOffset));
-
             topLeft.x = x + (metrics.horizontalBearingX - _padding - _stylePadding) * _scale;
             topLeft.y = y + (metrics.horizontalBearingY + _padding) * _scale;
             bottomRight.x = topLeft.x + (metrics.width + _padding * 2 + _stylePadding * 2) * _scale;
             bottomRight.y = topLeft.y - (metrics.height + _padding * 2) * _scale;
-
             topRight.x = bottomRight.x;
             topRight.y = topLeft.y;
             bottomLeft.x = topLeft.x;
             bottomLeft.y = bottomRight.y;
 
             #region Handle Italic & Shearing
+
             if (((_style & FontStyles.Italic) == FontStyles.Italic))
             {
                 // Shift Top vertices forward by half (Shear Value * height of character) and Bottom vertices back by same amount. 
-                float shear_value = _fontAsset.italicStyle * 0.01f;
+                float shear_value = realFontAsset.italicStyle * 0.01f;
                 Vector3 topShear = new Vector3(shear_value * ((metrics.horizontalBearingY + _padding + _stylePadding) * _scale), 0, 0);
                 Vector3 bottomShear = new Vector3(shear_value * (((metrics.horizontalBearingY - metrics.height - _padding - _stylePadding)) * _scale), 0, 0);
-
                 topLeft += topShear;
                 bottomLeft += bottomShear;
                 topRight += topShear;
                 bottomRight += bottomShear;
             }
+
             #endregion Handle Italics & Shearing
 
             vertList.Add(bottomLeft);
             vertList.Add(topLeft);
             vertList.Add(topRight);
             vertList.Add(bottomRight);
-
-            float u = (rect.x - _padding - _stylePadding) / _fontAsset.atlasWidth;
-            float v = (rect.y - _padding - _stylePadding) / _fontAsset.atlasHeight;
-            float uw = (rect.width + _padding * 2 + _stylePadding * 2) / _fontAsset.atlasWidth;
-            float vw = (rect.height + _padding * 2 + _stylePadding * 2) / _fontAsset.atlasHeight;
-
+            float u = (rect.x - _padding - _stylePadding) / realFontAsset.atlasWidth;
+            float v = (rect.y - _padding - _stylePadding) / realFontAsset.atlasHeight;
+            float uw = (rect.width + _padding * 2 + _stylePadding * 2) / realFontAsset.atlasWidth;
+            float vw = (rect.height + _padding * 2 + _stylePadding * 2) / realFontAsset.atlasHeight;
             uvBottomLeft = new Vector2(u, v);
             uvTopLeft = new Vector2(u, v + vw);
             uvTopRight = new Vector2(u + uw, v + vw);
             uvBottomRight = new Vector2(u + uw, v);
-
             float xScale = _scale * 0.01f;
             if (_format.bold)
                 xScale *= -1;
@@ -353,34 +371,28 @@ namespace FairyGUI
             uv2TopLeft = new Vector2(511, xScale);
             uv2TopRight = new Vector2(2093567, xScale);
             uv2BottomRight = new Vector2(2093056, xScale);
-
             uvList.Add(uvBottomLeft);
             uvList.Add(uvTopLeft);
             uvList.Add(uvTopRight);
             uvList.Add(uvBottomRight);
-
             uv2List.Add(uv2BottomLeft);
             uv2List.Add(uv2TopLeft);
             uv2List.Add(uv2TopRight);
             uv2List.Add(uv2BottomRight);
-
             colList.Add(vertexColors[0]);
             colList.Add(vertexColors[1]);
             colList.Add(vertexColors[2]);
             colList.Add(vertexColors[3]);
-
             return 4;
         }
 
         override public int DrawLine(float x, float y, float width, int fontSize, int type,
-             List<Vector3> vertList, List<Vector2> uvList, List<Vector2> uv2List, List<Color32> colList)
+            List<Vector3> vertList, List<Vector2> uvList, List<Vector2> uv2List, List<Color32> colList)
         {
             if (_lineChar == null)
                 return 0;
-
             float thickness;
             float offset;
-
             if (type == 0)
             {
                 thickness = _fontAsset.faceInfo.underlineThickness;
@@ -392,12 +404,13 @@ namespace FairyGUI
                 offset = _fontAsset.faceInfo.strikethroughOffset;
             }
 
-            float scale = (float)fontSize / _fontAsset.faceInfo.pointSize * _fontAsset.faceInfo.scale;
+            float scale = (float) fontSize / _fontAsset.faceInfo.pointSize * _fontAsset.faceInfo.scale;
             float segmentWidth = _lineChar.glyph.metrics.width / 2 * scale;
             if (width < _lineChar.glyph.metrics.width * scale)
                 segmentWidth = width / 2f;
 
             // UNDERLINE VERTICES FOR (3) LINE SEGMENTS
+
             #region UNDERLINE VERTICES
 
             thickness = thickness * scale;
@@ -411,12 +424,10 @@ namespace FairyGUI
             topLeft.y = y + _padding * scale;
             bottomRight.x = x + segmentWidth;
             bottomRight.y = y - thickness - _padding * scale;
-
             topRight.x = bottomRight.x;
             topRight.y = topLeft.y;
             bottomLeft.x = topLeft.x;
             bottomLeft.y = bottomRight.y;
-
             vertList.Add(bottomLeft);
             vertList.Add(topLeft);
             vertList.Add(topRight);
@@ -425,10 +436,8 @@ namespace FairyGUI
             // Middle Part of the Underline
             topLeft = topRight;
             bottomLeft = bottomRight;
-
             topRight.x = x + width - segmentWidth;
             bottomRight.x = topRight.x;
-
             vertList.Add(bottomLeft);
             vertList.Add(topLeft);
             vertList.Add(topRight);
@@ -437,10 +446,8 @@ namespace FairyGUI
             // End Part of the Underline
             topLeft = topRight;
             bottomLeft = bottomRight;
-
             topRight.x = x + width;
             bottomRight.x = topRight.x;
-
             vertList.Add(bottomLeft);
             vertList.Add(topLeft);
             vertList.Add(topRight);
@@ -449,18 +456,18 @@ namespace FairyGUI
             #endregion
 
             // UNDERLINE UV0
+
             #region HANDLE UV0
 
             // Calculate UV required to setup the 3 Quads for the Underline.
-            Vector2 uv0 = new Vector2((_lineChar.glyph.glyphRect.x - _padding) / _fontAsset.atlasWidth, (_lineChar.glyph.glyphRect.y - _padding) / _fontAsset.atlasHeight);  // bottom left
-            Vector2 uv1 = new Vector2(uv0.x, (_lineChar.glyph.glyphRect.y + _lineChar.glyph.glyphRect.height + _padding) / _fontAsset.atlasHeight);  // top left
-            Vector2 uv2 = new Vector2((_lineChar.glyph.glyphRect.x - _padding + (float)_lineChar.glyph.glyphRect.width / 2) / _fontAsset.atlasWidth, uv1.y); // Mid Top Left
+            Vector2 uv0 = new Vector2((_lineChar.glyph.glyphRect.x - _padding) / _fontAsset.atlasWidth, (_lineChar.glyph.glyphRect.y - _padding) / _fontAsset.atlasHeight); // bottom left
+            Vector2 uv1 = new Vector2(uv0.x, (_lineChar.glyph.glyphRect.y + _lineChar.glyph.glyphRect.height + _padding) / _fontAsset.atlasHeight); // top left
+            Vector2 uv2 = new Vector2((_lineChar.glyph.glyphRect.x - _padding + (float) _lineChar.glyph.glyphRect.width / 2) / _fontAsset.atlasWidth, uv1.y); // Mid Top Left
             Vector2 uv3 = new Vector2(uv2.x, uv0.y); // Mid Bottom Left
-            Vector2 uv4 = new Vector2((_lineChar.glyph.glyphRect.x + _padding + (float)_lineChar.glyph.glyphRect.width / 2) / _fontAsset.atlasWidth, uv1.y); // Mid Top Right
+            Vector2 uv4 = new Vector2((_lineChar.glyph.glyphRect.x + _padding + (float) _lineChar.glyph.glyphRect.width / 2) / _fontAsset.atlasWidth, uv1.y); // Mid Top Right
             Vector2 uv5 = new Vector2(uv4.x, uv0.y); // Mid Bottom right
             Vector2 uv6 = new Vector2((_lineChar.glyph.glyphRect.x + _padding + _lineChar.glyph.glyphRect.width) / _fontAsset.atlasWidth, uv1.y); // End Part - Bottom Right
             Vector2 uv7 = new Vector2(uv6.x, uv0.y); // End Part - Top Right
-
             uvList.Add(uv0);
             uvList.Add(uv1);
             uvList.Add(uv2);
@@ -473,7 +480,6 @@ namespace FairyGUI
             uvList.Add(new Vector2(uv2.x + uv2.x * 0.001f, uv0.y));
 
             // Right Part of the Underline
-
             uvList.Add(uv5);
             uvList.Add(uv4);
             uvList.Add(uv6);
@@ -482,24 +488,23 @@ namespace FairyGUI
             #endregion
 
             // UNDERLINE UV2
+
             #region HANDLE UV2 - SDF SCALE
+
             // UV1 contains Face / Border UV layout.
             float segUv1 = segmentWidth / width;
             float segUv2 = 1 - segUv1;
 
             //Calculate the xScale or how much the UV's are getting stretched on the X axis for the middle section of the underline.
             float xScale = scale * 0.01f;
-
             uv2List.Add(PackUV(0, 0, xScale));
             uv2List.Add(PackUV(0, 1, xScale));
             uv2List.Add(PackUV(segUv1, 1, xScale));
             uv2List.Add(PackUV(segUv1, 0, xScale));
-
             uv2List.Add(PackUV(segUv1, 0, xScale));
             uv2List.Add(PackUV(segUv1, 1, xScale));
             uv2List.Add(PackUV(segUv2, 1, xScale));
             uv2List.Add(PackUV(segUv2, 0, xScale));
-
             uv2List.Add(PackUV(segUv2, 0, xScale));
             uv2List.Add(PackUV(segUv2, 1, xScale));
             uv2List.Add(PackUV(1, 1, xScale));
@@ -508,9 +513,10 @@ namespace FairyGUI
             #endregion
 
             // UNDERLINE VERTEX COLORS
-            #region
-            // Alpha is the lower of the vertex color or tag color alpha used.
 
+            #region
+
+            // Alpha is the lower of the vertex color or tag color alpha used.
             for (int i = 0; i < 12; i++)
                 colList.Add(vertexColors[0]);
 
@@ -521,20 +527,53 @@ namespace FairyGUI
 
         Vector2 PackUV(float x, float y, float xScale)
         {
-            double x0 = (int)(x * 511);
-            double y0 = (int)(y * 511);
-
-            return new Vector2((float)((x0 * 4096) + y0), xScale);
+            double x0 = (int) (x * 511);
+            double y0 = (int) (y * 511);
+            return new Vector2((float) ((x0 * 4096) + y0), xScale);
         }
 
         override public bool HasCharacter(char ch)
         {
-            return _fontAsset.HasCharacter(ch);
+            return HasCharacter(ch, true);
+        }
+
+        public bool HasCharacter(char ch, bool searchFallbacks)
+        {
+            return _fontAsset.HasCharacter(ch, searchFallbacks);
         }
 
         override public int GetLineHeight(int size)
         {
-            return Mathf.RoundToInt(_lineHeight * ((float)size / _fontAsset.faceInfo.pointSize * _fontAsset.faceInfo.scale));
+            return Mathf.RoundToInt(_lineHeight * ((float) size / _fontAsset.faceInfo.pointSize * _fontAsset.faceInfo.scale));
+        }
+
+        public NTexture GetTexture(int textureIndex)
+        {
+            if (mainTextures.Count != _fontAsset.atlasTextures.Length)
+            {
+                for (int i = mainTextures.Count; i < _fontAsset.atlasTextures.Length; i++)
+                {
+                    if (_fontAsset.atlasTextures[i] != null)
+                    {
+                        NTexture tex = new NTexture(_fontAsset.atlasTextures[i]);
+                        tex.destroyMethod = DestroyMethod.None;
+                        mainTextures.Add(tex);
+                        MaterialManager manager = tex.GetMaterialManager(this.shader);
+                        manager.onCreateNewMaterial += OnCreateNewMaterial;
+                        _manager.Add(manager);
+                    }
+                }
+            }
+
+            if (textureIndex <= mainTextures.Count - 1)
+            {
+                return mainTextures[textureIndex];
+            }
+            else
+            {
+                Debug.LogWarning($"GetTexture TMP字体图集错误 {textureIndex}");
+                return mainTexture;
+            }
         }
     }
 }

@@ -3,13 +3,23 @@ using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
 using FairyGUI.Utils;
+#if FAIRYGUI_TMPRO
+using TMPro;
+
+#endif
 
 namespace FairyGUI
 {
     /// <summary>
     /// 
     /// </summary>
-    public class TextField : DisplayObject, IMeshFactory
+    public class TextField :
+#if FAIRYGUI_TMPRO
+        Container
+#else
+        DisplayObject
+#endif
+        , IMeshFactory
     {
         VertAlignType _verticalAlign;
         TextFormat _textFormat;
@@ -22,7 +32,7 @@ namespace FairyGUI
         RTLSupport.DirectionType _textDirection;
         int _maxWidth;
 
-        List<HtmlElement> _elements;
+        public List<HtmlElement> _elements;
         List<LineInfo> _lines;
         List<CharPosition> _charPositions;
 
@@ -30,8 +40,8 @@ namespace FairyGUI
         float _textWidth;
         float _textHeight;
         bool _textChanged;
-        float _yOffset;
-        float _fontSizeScale;
+        float _yOffset; 
+        public float _fontSizeScale;
         float _renderScale;
         int _fontVersion;
         string _parsedText;
@@ -39,13 +49,27 @@ namespace FairyGUI
 
         RichTextField _richTextField;
 
+#if FAIRYGUI_TMPRO
+        private TextFieldDisplay _textFieldDisplay;
+        // Avoid base class get "graphics" to do something
+        public new NGraphics graphics;
+        private List<TMPSubTextField> _subTextFields = new List<TMPSubTextField>();
+        private Dictionary<int, int> _fallbackTextureIndexLookup = new Dictionary<int, int>(); //key: material instance id.  value: index
+        public int activeSubMeshCount { private set; get; } = 0;
+
+        public TMPSubTextField GetSubTextField(int index)
+        {
+            return _subTextFields[index];
+        }
+#endif
+
         const int GUTTER_X = 2;
         const int GUTTER_Y = 2;
         const float IMAGE_BASELINE = 0.8f;
         const int ELLIPSIS_LENGTH = 2;
         static float[] STROKE_OFFSET = new float[]
         {
-             -1, 0, 1, 0,
+            -1, 0, 1, 0,
             0, -1, 0, 1,
             -1, -1, 1, -1,
             -1, 1, 1, 1
@@ -55,21 +79,26 @@ namespace FairyGUI
         public TextField()
         {
             _flags |= Flags.TouchDisabled;
-
             _textFormat = new TextFormat();
             _fontSizeScale = 1;
             _renderScale = UIContentScaler.scaleFactor;
-
             _wordWrap = false;
             _text = string.Empty;
             _parsedText = string.Empty;
-
             _elements = new List<HtmlElement>(0);
             _lines = new List<LineInfo>(1);
-
+#if FAIRYGUI_TMPRO
+            _textFieldDisplay = new TextFieldDisplay(this);
+            graphics = _textFieldDisplay.graphics;
+            gameObject.name = "TextField";
+            this.opaque = true;
+            AddChild(_textFieldDisplay);
+            activeSubMeshCount = 0;
+#else
             CreateGameObject("TextField");
             graphics = new NGraphics(gameObject);
             graphics.meshFactory = this;
+#endif
         }
 
         internal void EnableRichSupport(RichTextField richTextField)
@@ -146,10 +175,7 @@ namespace FairyGUI
         /// </summary>
         public VertAlignType verticalAlign
         {
-            get
-            {
-                return _verticalAlign;
-            }
+            get { return _verticalAlign; }
             set
             {
                 if (_verticalAlign != value)
@@ -171,7 +197,6 @@ namespace FairyGUI
             {
                 if (_text == value && !_html)
                     return;
-
                 _text = value;
                 _textChanged = true;
                 _html = false;
@@ -188,7 +213,6 @@ namespace FairyGUI
             {
                 if (_text == value && _html)
                     return;
-
                 _text = value;
                 _textChanged = true;
                 _html = true;
@@ -253,16 +277,13 @@ namespace FairyGUI
         /// </summary>
         public float stroke
         {
-            get
-            {
-                return _textFormat.outline;
-            }
+            get { return _textFormat.outline; }
             set
             {
                 if (_textFormat.outline != value)
                 {
                     _textFormat.outline = value;
-                    graphics.SetMeshDirty();
+                    SetMeshDirty();
                 }
             }
         }
@@ -272,16 +293,13 @@ namespace FairyGUI
         /// </summary>
         public Color strokeColor
         {
-            get
-            {
-                return _textFormat.outlineColor;
-            }
+            get { return _textFormat.outlineColor; }
             set
             {
                 if (_textFormat.outlineColor != value)
                 {
                     _textFormat.outlineColor = value;
-                    graphics.SetMeshDirty();
+                    SetMeshDirty();
                 }
             }
         }
@@ -291,14 +309,11 @@ namespace FairyGUI
         /// </summary>
         public Vector2 shadowOffset
         {
-            get
-            {
-                return _textFormat.shadowOffset;
-            }
+            get { return _textFormat.shadowOffset; }
             set
             {
                 _textFormat.shadowOffset = value;
-                graphics.SetMeshDirty();
+                SetMeshDirty();
             }
         }
 
@@ -311,7 +326,6 @@ namespace FairyGUI
             {
                 if (_textChanged)
                     BuildLines();
-
                 return _textWidth;
             }
         }
@@ -325,7 +339,6 @@ namespace FairyGUI
             {
                 if (_textChanged)
                     BuildLines();
-
                 return _textHeight;
             }
         }
@@ -355,7 +368,6 @@ namespace FairyGUI
             {
                 if (_textChanged)
                     BuildLines();
-
                 return _elements;
             }
         }
@@ -369,7 +381,6 @@ namespace FairyGUI
             {
                 if (_textChanged)
                     BuildLines();
-
                 return _lines;
             }
         }
@@ -383,9 +394,7 @@ namespace FairyGUI
             {
                 if (_textChanged)
                     BuildLines();
-
-                graphics.UpdateMesh();
-
+                UpdateMesh();
                 return _charPositions;
             }
         }
@@ -397,6 +406,46 @@ namespace FairyGUI
         {
             get { return _richTextField; }
         }
+
+#if FAIRYGUI_TMPRO
+        /// <summary>
+        /// 
+        /// </summary>
+        override public Material material
+        {
+            get
+            {
+                if (graphics != null)
+                    return graphics.material;
+                else
+                    return null;
+            }
+            set
+            {
+                if (graphics != null)
+                    graphics.material = value;
+            }
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        override public string shader
+        {
+            get
+            {
+                if (graphics != null)
+                    return graphics.shader;
+                else
+                    return null;
+            }
+            set
+            {
+                if (graphics != null)
+                    graphics.shader = value;
+            }
+        }
+#endif
 
         /// <summary>
         /// 
@@ -413,7 +462,6 @@ namespace FairyGUI
 
             if (_font.keepCrisp && _renderScale != UIContentScaler.scaleFactor)
                 _textChanged = true;
-
             if (_font.version != _fontVersion)
             {
                 _fontVersion = _font.version;
@@ -428,8 +476,7 @@ namespace FairyGUI
 
             if (_textChanged)
                 BuildLines();
-
-            return graphics.UpdateMesh();
+            return UpdateMesh();
         }
 
         /// <summary>
@@ -493,6 +540,7 @@ namespace FairyGUI
                     else
                         resultRects.Add(r);
                 }
+
                 r = Rect.MinMaxRect(GUTTER_X, r.yMax, endCharX, line2.y + line2.height);
                 if (clipped)
                     resultRects.Add(ToolSet.Intersection(ref r, ref _contentRect));
@@ -505,11 +553,19 @@ namespace FairyGUI
         {
             if ((_flags & Flags.UpdatingSize) == 0)
             {
+#if FAIRYGUI_TMPRO
+                int count = numChildren;
+                
+                for (int i = 0; i < count; i++)
+                {
+                    DisplayObject child = GetChildAt(i);
+                    child.size = _contentRect.size; //千万不可以调用this.size,后者会触发EnsureSizeCorrect
+                }
+#endif
                 if (_autoSize == AutoSizeType.Shrink || _autoSize == AutoSizeType.Ellipsis || _wordWrap && (_flags & Flags.WidthChanged) != 0)
                     _textChanged = true;
                 else if (_autoSize != AutoSizeType.None)
-                    graphics.SetMeshDirty();
-
+                    SetMeshDirty();
                 if (_verticalAlign != VertAlignType.Top)
                     ApplyVertAlign();
             }
@@ -527,7 +583,6 @@ namespace FairyGUI
         {
             if (_richTextField == null) //如果是richTextField，会在update前主动调用了Redraw
                 Redraw();
-
             base.Update(context);
         }
 
@@ -570,13 +625,11 @@ namespace FairyGUI
             }
 
             _textChanged = false;
-            graphics.SetMeshDirty();
+            SetMeshDirty();
             _renderScale = UIContentScaler.scaleFactor;
             _fontSizeScale = 1;
             _ellipsisCharIndex = -1;
-
             Cleanup();
-
             if (_text.Length == 0)
             {
                 LineInfo emptyLine = LineInfo.Borrow();
@@ -585,14 +638,12 @@ namespace FairyGUI
                 emptyLine.charIndex = emptyLine.charCount = 0;
                 emptyLine.y = emptyLine.y2 = GUTTER_Y;
                 _lines.Add(emptyLine);
-
                 _textWidth = _textHeight = 0;
             }
             else
             {
                 ParseText();
                 BuildLines2();
-
                 if (_autoSize == AutoSizeType.Shrink)
                     DoShrink();
             }
@@ -613,6 +664,7 @@ namespace FairyGUI
                 }
                 else
                     SetSize(_textWidth, _textHeight);
+
                 InvalidateBatchingState();
                 _flags &= ~Flags.UpdatingSize;
             }
@@ -628,6 +680,7 @@ namespace FairyGUI
                 }
                 else
                     this.height = _textHeight;
+
                 InvalidateBatchingState();
                 _flags &= ~Flags.UpdatingSize;
             }
@@ -645,7 +698,6 @@ namespace FairyGUI
             {
                 HtmlParser.inst.Parse(_text, _textFormat, _elements,
                     _richTextField != null ? _richTextField.htmlParseOptions : null);
-
                 _parsedText = string.Empty;
             }
             else
@@ -656,7 +708,6 @@ namespace FairyGUI
             {
                 if (_textDirection != RTLSupport.DirectionType.UNKNOW)
                     _parsedText = RTLSupport.DoMapping(_parsedText);
-
                 bool flag = _input || _richTextField != null && _richTextField.emojies != null;
                 if (!flag)
                 {
@@ -693,16 +744,16 @@ namespace FairyGUI
                     {
                         if (_textDirection != RTLSupport.DirectionType.UNKNOW)
                             element.text = RTLSupport.DoMapping(element.text);
-
                         i = ParseText(buffer, element.text, i);
                         elementCount = _elements.Count;
                     }
                     else if (element.isEntity)
                         buffer.Append(' ');
+
                     i++;
                 }
-                _parsedText = buffer.ToString();
 
+                _parsedText = buffer.ToString();
 #if RTL_TEXT_SUPPORT
                 // element.text拼接完后再进行一次判断文本主语序，避免html标签存在把文本变成混合文本 [2018/12/12/ 16:47:42 by aq_1000]
                 _textDirection = RTLSupport.DetectTextDirection(_parsedText);
@@ -717,11 +768,11 @@ namespace FairyGUI
             float rectWidth = _contentRect.width - GUTTER_X * 2;
             float rectHeight = _contentRect.height > 0 ? Mathf.Max(_contentRect.height, _font.GetLineHeight(_textFormat.size)) : 0;
             float glyphWidth = 0, glyphHeight = 0, baseline = 0;
+            bool isFallback = false;
             short wordLen = 0;
             bool wordPossible = false;
             float posx = 0;
             bool checkEdge = _autoSize == AutoSizeType.Ellipsis;
-
             TextFormat format = _textFormat;
             _font.SetFormat(format, _fontSizeScale);
             bool wrap = _wordWrap && !_singleLine;
@@ -730,28 +781,23 @@ namespace FairyGUI
                 wrap = true;
                 rectWidth = _maxWidth - GUTTER_X * 2;
             }
+
             _textWidth = _textHeight = 0;
-
             RequestText();
-
             int elementCount = _elements.Count;
             int elementIndex = 0;
             HtmlElement element = null;
             if (elementCount > 0)
                 element = _elements[elementIndex];
             int textLength = _parsedText.Length;
-
             LineInfo line = LineInfo.Borrow();
             _lines.Add(line);
             line.y = line.y2 = GUTTER_Y;
             sLineChars.Clear();
-
             for (int charIndex = 0; charIndex < textLength; charIndex++)
             {
                 char ch = _parsedText[charIndex];
-
                 glyphWidth = glyphHeight = baseline = 0;
-
                 while (element != null && element.charIndex == charIndex)
                 {
                     if (element.type == HtmlElementType.Text)
@@ -764,10 +810,11 @@ namespace FairyGUI
                         IHtmlObject htmlObject = element.htmlObject;
                         if (_richTextField != null && htmlObject == null)
                         {
-                            element.space = (int)(rectWidth - line.width - 4);
+                            element.space = (int) (rectWidth - line.width - 4);
                             htmlObject = _richTextField.htmlPageContext.CreateObject(_richTextField, element);
                             element.htmlObject = htmlObject;
                         }
+
                         if (htmlObject != null)
                         {
                             glyphWidth = htmlObject.width + 2;
@@ -790,11 +837,10 @@ namespace FairyGUI
                 {
                     wordPossible = false;
                 }
-                else if (_font.GetGlyph(ch == '\t' ? ' ' : ch, out glyphWidth, out glyphHeight, out baseline))
+                else if (_font.GetGlyph(ch == '\t' ? ' ' : ch, out glyphWidth, out glyphHeight, out baseline, out isFallback))
                 {
                     if (ch == '\t')
                         glyphWidth *= 4;
-
                     if (wordPossible)
                     {
                         if (char.IsWhiteSpace(ch))
@@ -802,11 +848,11 @@ namespace FairyGUI
                             wordLen = 0;
                         }
                         else if (ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z'
-                            || ch >= '0' && ch <= '9'
-                            || ch == '.' || ch == '"' || ch == '\''
-                            || format.specialStyle == TextFormat.SpecialStyle.Subscript
-                            || format.specialStyle == TextFormat.SpecialStyle.Superscript
-                            || _textDirection != RTLSupport.DirectionType.UNKNOW && RTLSupport.IsArabicLetter(ch))
+                                                        || ch >= '0' && ch <= '9'
+                                                        || ch == '.' || ch == '"' || ch == '\''
+                                                        || format.specialStyle == TextFormat.SpecialStyle.Subscript
+                                                        || format.specialStyle == TextFormat.SpecialStyle.Superscript
+                                                        || _textDirection != RTLSupport.DirectionType.UNKNOW && RTLSupport.IsArabicLetter(ch))
                         {
                             wordLen++;
                         }
@@ -819,7 +865,7 @@ namespace FairyGUI
                         wordPossible = true;
                     }
                     else if (format.specialStyle == TextFormat.SpecialStyle.Subscript
-                        || format.specialStyle == TextFormat.SpecialStyle.Superscript)
+                             || format.specialStyle == TextFormat.SpecialStyle.Superscript)
                     {
                         if (sLineChars.Count > 0)
                         {
@@ -833,7 +879,7 @@ namespace FairyGUI
                 else
                     wordPossible = false;
 
-                sLineChars.Add(new LineCharInfo() { width = glyphWidth, height = glyphHeight, baseline = baseline });
+                sLineChars.Add(new LineCharInfo() {width = glyphWidth, height = glyphHeight, baseline = baseline});
                 if (glyphWidth != 0)
                 {
                     if (posx != 0)
@@ -844,7 +890,6 @@ namespace FairyGUI
                 if (ch == '\n' && !_singleLine)
                 {
                     UpdateLineInfo(line, letterSpacing, sLineChars.Count);
-
                     LineInfo newLine = LineInfo.Borrow();
                     _lines.Add(newLine);
                     newLine.y = line.y + (line.height + lineSpacing);
@@ -852,10 +897,8 @@ namespace FairyGUI
                         newLine.y = GUTTER_Y;
                     newLine.y2 = newLine.y;
                     newLine.charIndex = line.charIndex + line.charCount;
-
                     if (checkEdge && line.y + line.height < rectHeight)
                         _ellipsisCharIndex = line.charIndex + Math.Max(0, line.charCount - ELLIPSIS_LENGTH);
-
                     sLineChars.Clear();
                     wordPossible = false;
                     posx = 0;
@@ -867,7 +910,6 @@ namespace FairyGUI
                     {
                         int lineCharCount = sLineChars.Count;
                         int toMoveChars;
-
                         if (wordPossible && wordLen < 20 && lineCharCount > 2) //if word had broken, move word to new line
                         {
                             toMoveChars = wordLen;
@@ -888,7 +930,6 @@ namespace FairyGUI
                             newLine.y = GUTTER_Y;
                         newLine.y2 = newLine.y;
                         newLine.charIndex = line.charIndex + line.charCount;
-
                         posx = 0;
                         if (toMoveChars != 0)
                         {
@@ -907,7 +948,6 @@ namespace FairyGUI
 
                         if (checkEdge && line.y + line.height < rectHeight)
                             _ellipsisCharIndex = line.charIndex + Math.Max(0, line.charCount - ELLIPSIS_LENGTH);
-
                         wordPossible = false;
                         line = newLine;
                     }
@@ -917,14 +957,11 @@ namespace FairyGUI
             }
 
             UpdateLineInfo(line, letterSpacing, sLineChars.Count);
-
             if (_textWidth > 0)
                 _textWidth += GUTTER_X * 2;
             _textHeight = line.y + line.height + GUTTER_Y;
-
             if (checkEdge && _textWidth <= _contentRect.width && _textHeight <= _contentRect.height + GUTTER_Y)
                 _ellipsisCharIndex = -1;
-
             _textWidth = Mathf.RoundToInt(_textWidth);
             _textHeight = Mathf.RoundToInt(_textHeight);
         }
@@ -942,7 +979,6 @@ namespace FairyGUI
 
                 if (ci.height - ci.baseline > line.height - line.baseline)
                     line.height += (ci.height - ci.baseline - (line.height - line.baseline));
-
                 if (ci.width > 0)
                 {
                     if (line.width != 0)
@@ -961,8 +997,7 @@ namespace FairyGUI
 
             if (line.width > _textWidth)
                 _textWidth = line.width;
-
-            line.charCount = (short)cnt;
+            line.charCount = (short) cnt;
         }
 
         void DoShrink()
@@ -976,12 +1011,10 @@ namespace FairyGUI
                 //先尝试猜测一个比例
                 _fontSizeScale = Mathf.Sqrt(_contentRect.height / _textHeight);
                 int cur = Mathf.FloorToInt(_fontSizeScale * _textFormat.size);
-
                 while (true)
                 {
                     LineInfo.Return(_lines);
                     BuildLines2();
-
                     if (_textWidth > _contentRect.width || _textHeight > _contentRect.height)
                         high = cur;
                     else
@@ -989,7 +1022,7 @@ namespace FairyGUI
                     if (high - low > 1 || high != low && cur == high)
                     {
                         cur = low + (high - low) / 2;
-                        _fontSizeScale = (float)cur / _textFormat.size;
+                        _fontSizeScale = (float) cur / _textFormat.size;
                     }
                     else
                         break;
@@ -998,16 +1031,13 @@ namespace FairyGUI
             else if (_textWidth > _contentRect.width)
             {
                 _fontSizeScale = _contentRect.width / _textWidth;
-
                 LineInfo.Return(_lines);
                 BuildLines2();
-
                 if (_textWidth > _contentRect.width) //如果还超出，缩小一点再来一次
                 {
                     int size = Mathf.FloorToInt(_textFormat.size * _fontSizeScale);
                     size--;
-                    _fontSizeScale = (float)size / _textFormat.size;
-
+                    _fontSizeScale = (float) size / _textFormat.size;
                     LineInfo.Return(_lines);
                     BuildLines2();
                 }
@@ -1039,7 +1069,7 @@ namespace FairyGUI
                         uint emojiKey = 0;
                         Emoji emoji;
                         if (highSurrogate)
-                            emojiKey = ((uint)source[j + 1] & 0x03FF) + ((((uint)ch & 0x03FF) + 0x40) << 10);
+                            emojiKey = ((uint) source[j + 1] & 0x03FF) + ((((uint) ch & 0x03FF) + 0x40) << 10);
                         else
                             emojiKey = ch;
                         if (_richTextField.emojies.TryGetValue(emojiKey, out emoji))
@@ -1056,7 +1086,6 @@ namespace FairyGUI
                                 imageElement.text = source.Substring(j, 1);
                             imageElement.format.align = _textFormat.align;
                             _elements.Insert(++elementIndex, imageElement);
-
                             buffer.Append(source, appendPos, j - appendPos);
                             appendPos = j;
                             imageElement.charIndex = buffer.Length;
@@ -1067,20 +1096,26 @@ namespace FairyGUI
                     {
                         buffer.Append(source, appendPos, j - appendPos);
                         appendPos = j + 2;
-                        j++;//跳过lowSurrogate
+                        j++; //跳过lowSurrogate
                         buffer.Append(' ');
                     }
                 }
+
                 j++;
             }
+
             if (appendPos < textLength)
                 buffer.Append(source, appendPos, j - appendPos);
-
             return elementIndex;
         }
 
         public void OnPopulateMesh(VertexBuffer vb)
         {
+#if FAIRYGUI_TMPRO
+            _fallbackTextureIndexLookup.Clear();
+            foreach (var tmpSubTextField in _subTextFields)
+                tmpSubTextField.CleanUp();
+#endif
             if (_textWidth == 0 && _lines.Count == 1)
             {
                 if (_charPositions != null)
@@ -1091,7 +1126,6 @@ namespace FairyGUI
 
                 if (_richTextField != null)
                     _richTextField.RefreshObjects();
-
                 return;
             }
 
@@ -1099,22 +1133,17 @@ namespace FairyGUI
             TextFormat format = _textFormat;
             _font.SetFormat(format, _fontSizeScale);
             _font.UpdateGraphics(graphics);
-
             float rectWidth = _contentRect.width > 0 ? (_contentRect.width - GUTTER_X * 2) : 0;
             float rectHeight = _contentRect.height > 0 ? Mathf.Max(_contentRect.height, _font.GetLineHeight(format.size)) : 0;
-
             if (_charPositions != null)
                 _charPositions.Clear();
-
             List<Vector3> vertList = vb.vertices;
             List<Vector2> uvList = vb.uvs;
             List<Vector2> uv2List = vb.uvs2;
             List<Color32> colList = vb.colors;
-
             HtmlLink currentLink = null;
             float linkStartX = 0;
             int linkStartLine = 0;
-
             float posx = 0;
             float indent_x;
             bool clipping = !_input && (_autoSize == AutoSizeType.None || _autoSize == AutoSizeType.Ellipsis);
@@ -1122,58 +1151,51 @@ namespace FairyGUI
             AlignType lineAlign;
             float glyphWidth, glyphHeight, baseline;
             short vertCount;
+            bool isFallback;
             float underlineStart;
             float strikethroughStart;
             int minFontSize;
             int maxFontSize;
             string rtlLine = null;
-
             int elementIndex = 0;
             int elementCount = _elements.Count;
             HtmlElement element = null;
             if (elementCount > 0)
                 element = _elements[elementIndex];
-
             int lineCount = _lines.Count;
             for (int i = 0; i < lineCount; ++i)
             {
                 LineInfo line = _lines[i];
                 if (line.charCount == 0)
                     continue;
-
                 lineClipped = clipping && i != 0 && line.y + line.height > rectHeight;
                 lineAlign = format.align;
                 if (element != null && element.charIndex == line.charIndex)
                     lineAlign = element.format.align;
                 else
                     lineAlign = format.align;
-
                 if (_textDirection == RTLSupport.DirectionType.RTL)
                 {
                     if (lineAlign == AlignType.Center)
-                        indent_x = (int)((rectWidth + line.width) / 2);
+                        indent_x = (int) ((rectWidth + line.width) / 2);
                     else if (lineAlign == AlignType.Right)
                         indent_x = rectWidth;
                     else
                         indent_x = line.width + GUTTER_X * 2;
-
                     if (indent_x > rectWidth)
                         indent_x = rectWidth;
-
                     posx = indent_x - GUTTER_X;
                 }
                 else
                 {
                     if (lineAlign == AlignType.Center)
-                        indent_x = (int)((rectWidth - line.width) / 2);
+                        indent_x = (int) ((rectWidth - line.width) / 2);
                     else if (lineAlign == AlignType.Right)
                         indent_x = rectWidth - line.width;
                     else
                         indent_x = 0;
-
                     if (indent_x < 0)
                         indent_x = 0;
-
                     posx = GUTTER_X + indent_x;
                 }
 
@@ -1181,7 +1203,6 @@ namespace FairyGUI
                 underlineStart = posx;
                 strikethroughStart = posx;
                 minFontSize = maxFontSize = format.size;
-
                 if (_textDirection != RTLSupport.DirectionType.UNKNOW)
                 {
                     rtlLine = _parsedText.Substring(line.charIndex, lineCharCount);
@@ -1192,12 +1213,15 @@ namespace FairyGUI
                     lineCharCount = rtlLine.Length;
                 }
 
+#if FAIRYGUI_TMPRO
+                // 该行中subIndex最大的值，使用这个subText去渲染删除线和下划线，否则线的渲染层级可能会不正确
+                int maxSubTextIndexInLine = -1;
+#endif
                 for (int j = 0; j < lineCharCount; j++)
                 {
                     int charIndex = line.charIndex + j;
                     char ch = rtlLine != null ? rtlLine[j] : _parsedText[charIndex];
                     bool isEllipsis = charIndex == _ellipsisCharIndex;
-
                     while (element != null && charIndex == element.charIndex)
                     {
                         if (element.type == HtmlElementType.Text)
@@ -1215,9 +1239,10 @@ namespace FairyGUI
                                         else
                                             lineWidth = underlineStart - (clipping ? Mathf.Clamp(posx, GUTTER_X, GUTTER_X + rectWidth) : posx);
                                         if (lineWidth > 0)
-                                            vertCount += (short)_font.DrawLine(underlineStart < posx ? underlineStart : posx, -(line.y + line.baseline), lineWidth,
+                                            vertCount += (short) _font.DrawLine(underlineStart < posx ? underlineStart : posx, -(line.y + line.baseline), lineWidth,
                                                 maxFontSize, 0, vertList, uvList, uv2List, colList);
                                     }
+
                                     maxFontSize = 0;
                                 }
                                 else
@@ -1236,9 +1261,10 @@ namespace FairyGUI
                                         else
                                             lineWidth = strikethroughStart - (clipping ? Mathf.Clamp(posx, GUTTER_X, GUTTER_X + rectWidth) : posx);
                                         if (lineWidth > 0)
-                                            vertCount += (short)_font.DrawLine(strikethroughStart < posx ? strikethroughStart : posx, -(line.y + line.baseline), lineWidth,
+                                            vertCount += (short) _font.DrawLine(strikethroughStart < posx ? strikethroughStart : posx, -(line.y + line.baseline), lineWidth,
                                                 minFontSize, 1, vertList, uvList, uv2List, colList);
                                     }
+
                                     minFontSize = int.MaxValue;
                                 }
                                 else
@@ -1259,7 +1285,7 @@ namespace FairyGUI
                         }
                         else if (element.type == HtmlElementType.Link)
                         {
-                            currentLink = (HtmlLink)element.htmlObject;
+                            currentLink = (HtmlLink) element.htmlObject;
                             if (currentLink != null)
                             {
                                 element.position = Vector2.zero;
@@ -1283,15 +1309,14 @@ namespace FairyGUI
                             {
                                 if (_textDirection == RTLSupport.DirectionType.RTL)
                                     posx -= htmlObj.width - 2;
-
                                 if (_charPositions != null)
                                 {
                                     CharPosition cp = new CharPosition();
-                                    cp.lineIndex = (short)i;
+                                    cp.lineIndex = (short) i;
                                     cp.charIndex = _charPositions.Count;
-                                    cp.imgIndex = (short)(elementIndex + 1);
+                                    cp.imgIndex = (short) (elementIndex + 1);
                                     cp.offsetX = posx;
-                                    cp.width = (short)htmlObj.width;
+                                    cp.width = (short) htmlObj.width;
                                     _charPositions.Add(cp);
                                 }
 
@@ -1299,10 +1324,8 @@ namespace FairyGUI
                                     element.status |= 1;
                                 else
                                     element.status &= 254;
-
                                 element.position = new Vector2(posx + 1, line.y + line.baseline - htmlObj.height * IMAGE_BASELINE);
                                 htmlObj.SetPosition(element.position.x, element.position.y);
-
                                 if (_textDirection == RTLSupport.DirectionType.RTL)
                                     posx -= letterSpacing;
                                 else
@@ -1312,7 +1335,6 @@ namespace FairyGUI
 
                         if (element.isEntity)
                             ch = '\0';
-
                         elementIndex++;
                         if (elementIndex < elementCount)
                             element = _elements[elementIndex];
@@ -1324,12 +1346,49 @@ namespace FairyGUI
                         ch = '…';
                     else if (ch == '\0')
                         continue;
-
-                    if (_font.GetGlyph(ch == '\t' ? ' ' : ch, out glyphWidth, out glyphHeight, out baseline))
+                    if (_font.GetGlyph(ch == '\t' ? ' ' : ch, out glyphWidth, out glyphHeight, out baseline, out isFallback))
                     {
+#if FAIRYGUI_TMPRO
+                        int subTextIndex = -1;
+                        int subCharIndex = 0;
+                        TMPFont currentTmpFont = null;
+                        bool isDrawSubText = false;
+                        if (_font is TMPFont font && font.currentChar.elementType == TextElementType.Character && (isFallback || font.currentChar.glyph.atlasIndex != 0))
+                        {
+                            isDrawSubText = true;
+                            currentTmpFont = font;
+                            TMPFont fallbackTmpFont = FontManager.GetFont(font.currentChar.textAsset.name) as TMPFont;
+                            if (fallbackTmpFont != null)
+                            {
+                                int instanceId = fallbackTmpFont.GetTexture(font.currentChar.glyph.atlasIndex).nativeTexture
+                                    .GetInstanceID(); // fallbackTmpFont.mainTexture.nativeTexture.GetInstanceID();
+                                if (!_fallbackTextureIndexLookup.TryGetValue(instanceId, out subTextIndex))
+                                {
+                                    subTextIndex = _fallbackTextureIndexLookup.Count;
+                                    _fallbackTextureIndexLookup.Add(instanceId, subTextIndex);
+
+                                    // Get or create sub text
+                                    TMPSubTextField subTextField;
+                                    if (subTextIndex >= _subTextFields.Count)
+                                    {
+                                        subTextField = new TMPSubTextField(this, font.currentChar.glyph.atlasIndex);
+                                        _subTextFields.Add(subTextField);
+                                        AddChild(subTextField);
+                                    }
+                                    else
+                                        subTextField = _subTextFields[subTextIndex];
+
+                                    // Set sub text fields
+                                    // fallbackTmpFont.SetFormat(_textFormat, _fontSizeScale);
+                                    // fallbackTmpFont.UpdateGraphics(subTextField.graphics);
+                                    subTextField.TextureIndex = font.currentChar.glyph.atlasIndex;
+                                    subTextField.font = fallbackTmpFont;
+                                }
+                            }
+                        }
+#endif
                         if (ch == '\t')
                             glyphWidth *= 4;
-
                         if (!isEllipsis)
                         {
                             if (_textDirection == RTLSupport.DirectionType.RTL)
@@ -1352,16 +1411,34 @@ namespace FairyGUI
                             }
                         }
 
-                        vertCount = (short)_font.DrawGlyph(posx, -(line.y + line.baseline), vertList, uvList, uv2List, colList);
-
+#if FAIRYGUI_TMPRO
+                        if (subTextIndex > maxSubTextIndexInLine)
+                            maxSubTextIndexInLine = subTextIndex;
+                        if (isDrawSubText && subTextIndex >= 0)
+                        {
+                            vertCount = 0;
+                            TMPSubTextField subTextField = _subTextFields[subTextIndex];
+                            subCharIndex = subTextField.AddToRendererChar(currentTmpFont.currentChar, posx, -(line.y + line.baseline), charIndex);
+                        }
+                        else
+                        {
+#endif
+                            vertCount = (short) _font.DrawGlyph(posx, -(line.y + line.baseline), vertList, uvList, uv2List, colList);
+#if FAIRYGUI_TMPRO
+                        }
+#endif
                         if (_charPositions != null)
                         {
                             CharPosition cp = new CharPosition();
-                            cp.lineIndex = (short)i;
+                            cp.lineIndex = (short) i;
                             cp.charIndex = _charPositions.Count;
                             cp.vertCount = vertCount;
                             cp.offsetX = posx;
-                            cp.width = (short)glyphWidth;
+                            cp.width = (short) glyphWidth;
+#if FAIRYGUI_TMPRO
+                            cp.subIndex = (short) (subTextIndex + 1);
+                            cp.subCharIndex = subCharIndex;
+#endif
                             _charPositions.Add(cp);
                         }
 
@@ -1375,7 +1452,7 @@ namespace FairyGUI
                         if (_charPositions != null)
                         {
                             CharPosition cp = new CharPosition();
-                            cp.lineIndex = (short)i;
+                            cp.lineIndex = (short) i;
                             cp.charIndex = _charPositions.Count;
                             cp.offsetX = posx;
                             _charPositions.Add(cp);
@@ -1389,7 +1466,7 @@ namespace FairyGUI
 
                     if (isEllipsis)
                         lineClipped = true;
-                }//text loop
+                } //text loop
 
                 if (!lineClipped)
                 {
@@ -1402,8 +1479,31 @@ namespace FairyGUI
                         else
                             lineWidth = underlineStart - (clipping ? Mathf.Clamp(posx, GUTTER_X, GUTTER_X + rectWidth) : posx);
                         if (lineWidth > 0)
-                            vertCount += (short)_font.DrawLine(underlineStart < posx ? underlineStart : posx, -(line.y + line.baseline), lineWidth,
-                                maxFontSize, 0, vertList, uvList, uv2List, colList);
+                        {
+#if FAIRYGUI_TMPRO
+                            if (maxSubTextIndexInLine < 0)
+                            {
+#endif
+                                vertCount += (short) _font.DrawLine(underlineStart < posx ? underlineStart : posx, -(line.y + line.baseline), lineWidth,
+                                    maxFontSize, 0, vertList, uvList, uv2List, colList);
+#if FAIRYGUI_TMPRO
+                            }
+                            else
+                            {
+                                int charIndex = _subTextFields[maxSubTextIndexInLine].AddToRendererLine(0,
+                                    underlineStart < posx ? underlineStart : posx, -(line.y + line.baseline), lineWidth, maxFontSize);
+                                // line
+                                if (_charPositions != null)
+                                {
+                                    CharPosition cp = _charPositions[_charPositions.Count - 1];
+                                    cp.drawLineSubIndex = (short) (maxSubTextIndexInLine + 1);
+                                    cp.drawLineSubStartCharIndex = charIndex;
+                                    cp.drawLineCount = 1;
+                                    _charPositions[_charPositions.Count - 1] = cp;
+                                }
+                            }
+#endif
+                        }
                     }
 
                     if (format.strikethrough)
@@ -1414,8 +1514,38 @@ namespace FairyGUI
                         else
                             lineWidth = strikethroughStart - (clipping ? Mathf.Clamp(posx, GUTTER_X, GUTTER_X + rectWidth) : posx);
                         if (lineWidth > 0)
-                            vertCount += (short)_font.DrawLine(strikethroughStart < posx ? strikethroughStart : posx, -(line.y + line.baseline), lineWidth,
-                                minFontSize, 1, vertList, uvList, uv2List, colList);
+                        {
+#if FAIRYGUI_TMPRO
+                            if (maxSubTextIndexInLine < 0)
+                            {
+#endif
+                                vertCount += (short) _font.DrawLine(strikethroughStart < posx ? strikethroughStart : posx, -(line.y + line.baseline), lineWidth,
+                                    minFontSize, 1, vertList, uvList, uv2List, colList);
+#if FAIRYGUI_TMPRO
+                            }
+                            else
+                            {
+                                int charIndex = _subTextFields[maxSubTextIndexInLine].AddToRendererLine(1,
+                                    strikethroughStart < posx ? strikethroughStart : posx, -(line.y + line.baseline), lineWidth, minFontSize);
+                                // line
+                                if (_charPositions != null)
+                                {
+                                    CharPosition cp = _charPositions[_charPositions.Count - 1];
+                                    if (cp.lineIndex == (short) i && cp.drawLineSubIndex == (short) (maxSubTextIndexInLine + 1) &&
+                                        cp.drawLineSubStartCharIndex == charIndex - cp.drawLineCount)
+                                        cp.drawLineCount++;
+                                    else
+                                    {
+                                        cp.drawLineSubIndex = (short) (maxSubTextIndexInLine + 1);
+                                        cp.drawLineSubStartCharIndex = charIndex;
+                                        cp.drawLineCount = 1;
+                                    }
+
+                                    _charPositions[_charPositions.Count - 1] = cp;
+                                }
+                            }
+#endif
+                        }
                     }
 
                     if (vertCount > 0 && _charPositions != null)
@@ -1425,16 +1555,14 @@ namespace FairyGUI
                         _charPositions[_charPositions.Count - 1] = cp;
                     }
                 }
-
-            }//line loop
+            } //line loop
 
             if (element != null && element.type == HtmlElementType.LinkEnd && currentLink != null)
                 currentLink.SetArea(linkStartLine, linkStartX, lineCount - 1, posx);
-
             if (_charPositions != null)
             {
                 CharPosition cp = new CharPosition();
-                cp.lineIndex = (short)(lineCount - 1);
+                cp.lineIndex = (short) (lineCount - 1);
                 cp.charIndex = _charPositions.Count;
                 cp.offsetX = posx;
                 _charPositions.Add(cp);
@@ -1462,6 +1590,7 @@ namespace FairyGUI
                     drawDirs = UIConfig.enhancedTextOutlineEffect ? 8 : 4;
                     allocCount += count * drawDirs;
                 }
+
                 if (hasShadow)
                     allocCount += count;
                 if (allocCount > 65000)
@@ -1475,7 +1604,6 @@ namespace FairyGUI
                     VertexBuffer vb2 = VertexBuffer.Begin();
                     List<Vector3> vertList2 = vb2.vertices;
                     List<Color32> colList2 = vb2.colors;
-
                     Color32 col = _textFormat.outlineColor;
                     float outline = _textFormat.outline;
                     if (outline != 0)
@@ -1517,23 +1645,37 @@ namespace FairyGUI
             }
 
             vb.AddTriangles();
-
             if (_richTextField != null)
                 _richTextField.RefreshObjects();
+#if FAIRYGUI_TMPRO
+            int materialCount = _fallbackTextureIndexLookup.Count;
+            activeSubMeshCount = materialCount;
+            for (int i = 0; i < materialCount; i++)
+            {
+                var tmpSubTextField = _subTextFields[i];
+                tmpSubTextField.visible = true;
+                tmpSubTextField.ForceUpdateMesh();
+            }
+
+            for (int i = materialCount, subTextCount = _subTextFields.Count; i < subTextCount; i++)
+            {
+                var tmpSubTextField = _subTextFields[i];
+                tmpSubTextField.Clear();
+                tmpSubTextField.visible = false;
+            }
+#endif
         }
 
         void Cleanup()
         {
             if (_richTextField != null)
                 _richTextField.CleanupObjects();
-
             HtmlElement.ReturnElements(_elements);
             LineInfo.Return(_lines);
             _textWidth = 0;
             _textHeight = 0;
             _parsedText = string.Empty;
             _textDirection = RTLSupport.DirectionType.UNKNOW;
-
             if (_charPositions != null)
                 _charPositions.Clear();
         }
@@ -1542,7 +1684,7 @@ namespace FairyGUI
         {
             float oldOffset = _yOffset;
             if (_autoSize == AutoSizeType.Both || _autoSize == AutoSizeType.Height
-                || _verticalAlign == VertAlignType.Top)
+                                               || _verticalAlign == VertAlignType.Top)
                 _yOffset = 0;
             else
             {
@@ -1554,7 +1696,7 @@ namespace FairyGUI
                 if (dh < 0)
                     dh = 0;
                 if (_verticalAlign == VertAlignType.Middle)
-                    _yOffset = (int)(dh / 2);
+                    _yOffset = (int) (dh / 2);
                 else
                     _yOffset = dh;
             }
@@ -1564,9 +1706,38 @@ namespace FairyGUI
                 int cnt = _lines.Count;
                 for (int i = 0; i < cnt; i++)
                     _lines[i].y = _lines[i].y2 + _yOffset;
-
-                graphics.SetMeshDirty();
+                SetMeshDirty();
             }
+        }
+
+        override public void Dispose()
+        {
+            if ((_flags & Flags.Disposed) != 0)
+                return;
+#if FAIRYGUI_TMPRO
+            _fallbackTextureIndexLookup.Clear();
+            _subTextFields.Clear();
+#endif
+            base.Dispose();
+        }
+
+        public void SetMeshDirty()
+        {
+            graphics.SetMeshDirty();
+#if FAIRYGUI_TMPRO
+            foreach (var tmpSubTextField in _subTextFields)
+                tmpSubTextField.graphics.SetMeshDirty();
+#endif
+        }
+
+        private bool UpdateMesh()
+        {
+            bool changed = graphics.UpdateMesh();
+#if FAIRYGUI_TMPRO
+            foreach (var tmpSubTextField in _subTextFields)
+                changed |= tmpSubTextField.graphics.UpdateMesh();
+#endif
+            return changed;
         }
 
         /// <summary>
@@ -1647,7 +1818,6 @@ namespace FairyGUI
                 int cnt = values.Count;
                 for (int i = 0; i < cnt; i++)
                     pool.Push(values[i]);
-
                 values.Clear();
             }
         }
@@ -1696,6 +1866,34 @@ namespace FairyGUI
             /// 大于0表示图片索引。
             /// </summary>
             public short imgIndex;
+
+#if FAIRYGUI_TMPRO
+            /// <summary>
+            /// 大于0表示使用submesh
+            /// </summary>
+            public short subIndex;
+
+            /// <summary>
+            /// submesh的字符索引
+            /// </summary>
+            public int subCharIndex;
+
+
+            /// <summary>
+            /// 大于0表示使用submesh绘制line
+            /// </summary>
+            public short drawLineSubIndex;
+
+            /// <summary>
+            /// 绘制line的submesh的line起始字符索引
+            /// </summary>
+            public int drawLineSubStartCharIndex;
+
+            /// <summary>
+            /// 绘制line的数量
+            /// </summary>
+            public byte drawLineCount;
+#endif
         }
     }
 }
